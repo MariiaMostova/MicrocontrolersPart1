@@ -1,0 +1,208 @@
+using System;
+using System.Data;
+using System.Linq;
+using System.Windows.Forms;
+using System.IO.Ports;
+using System.Drawing;
+using System.Threading;
+
+namespace WindowsFormsApplication1
+{
+    public partial class Form1 : Form
+    {
+        private byte SLAVE1_ADRESS = 0x76;
+        private byte SLAVE2_ADRESS = 0x12;
+        private char[,] data1 = new char[4,3]{
+                         {'2', '7', '*'},
+                         {'0', '8', '*'},
+                         {'2', '0', '0'},
+                         {'1', '*', '*'}
+                         };
+    private char[] data2 = new char[4]{'2', '7', '.', '0'};
+
+     private int[] crc2 = new int[15]{ 223, 157, 97, 97, 229, 223, 157, 97, 97, 229, 12, 17, 53, 229, 0};
+        public Form1()
+        {
+            InitializeComponent();
+            textBox2.Clear();
+        }
+
+        private void comboBox1_Click(object sender, EventArgs e)
+        {
+            int num;
+            comboBox1.Items.Clear();
+            string[] ports = SerialPort.GetPortNames().OrderBy(a => a.Length > 3 && int.TryParse(a.Substring(3), out num) ? num : 0).ToArray();
+            comboBox1.Items.AddRange(ports);
+        }
+
+        private void buttonOpenPort_Click(object sender, EventArgs e)
+        {
+            if (!serialPort1.IsOpen)
+                try
+                {
+                    serialPort1.PortName = comboBox1.Text;
+                    serialPort1.Open();
+                    buttonOpenPort.Text = "Close";
+                    comboBox1.Enabled = false;
+                    button1.Visible = true;
+                    button2.Visible = true;
+                    buttonFromSlave1.Visible = true;
+                    buttonFromSlave2.Visible = true;
+                }
+                catch
+                {
+                    MessageBox.Show("Port " + comboBox1.Text + " is invalid!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            else
+            {
+                serialPort1.Close();
+                buttonOpenPort.Text = "Open";
+                comboBox1.Enabled = true;
+                button1.Visible = false;
+                button2.Visible = false;
+                buttonFromSlave1.Visible = false;
+                buttonFromSlave2.Visible = false;
+            }
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            byte[] b1 = new byte[4];
+            b1[0] = SLAVE1_ADRESS;
+            b1[1] = 0xA1;
+            b1[2] = Convert.ToByte(textBox1.Text, 2);
+            byte[] arrByte = { b1[2] };
+            b1[3] = Convert.ToByte(CRC8(arrByte));
+            serialPort1.Write(b1, 0, 4);
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            byte[] b1 = new byte[4];
+            b1[0] = SLAVE2_ADRESS;
+            b1[1] = 0xA1;
+            b1[2] = Convert.ToByte(textBox1.Text, 2);
+            byte[] arrByte = { b1[2] };
+            b1[3] = Convert.ToByte(CRC8(arrByte));
+            serialPort1.Write(b1, 0, 4);
+        }
+
+        private void buttonFromSlave1_Click(object sender, EventArgs e)
+        {
+            textBox2.Clear();
+            byte[] b1 = new byte[3];
+            b1[0] = SLAVE1_ADRESS;
+            b1[1] = 0xB1;
+            serialPort1.Write(b1, 0, 2);
+            byte[] b2 = new byte[60];
+            byte[] crcArr = new byte[4];
+            for (int i = 0; i < 4; i++)
+            {
+                byte[] checkChar = new byte[3];
+                for (int j = 0; j < 3; j++)
+                {
+                    checkChar[j] = Convert.ToByte(data1[i, j]);
+                }
+                crcArr[i] = CRC8(checkChar);
+            }
+            for (int i = 0; i < 16; i++)
+            {
+                b2[i] = (byte)serialPort1.ReadByte();
+                if (i % 4 != 0 )
+                {
+                    textBox2.Text += (char)b2[i];
+                }
+                else
+                {
+                    if (i == 0) { }
+                    else if (i % 4 == 0)
+                    {
+                        int k = i / 4;
+                        if ((byte)crcArr[k] != (byte)b2[i])
+                        {
+                            MessageBox.Show("There are not correct bit", i.ToString());
+                        }
+                    }
+
+                }
+            }
+            serialPort1.Write(b2, 0, 60);
+        }
+
+        private void buttonFromSlave2_Click(object sender, EventArgs e)
+        {
+            textBox2.Clear();
+            byte[] b3 = new byte[3];
+            b3[0] = SLAVE2_ADRESS;
+            b3[1] = 0xB1;
+            serialPort1.Write(b3, 0, 2);
+            byte[] b4 = new byte[4];
+            for (int i = 0; i < 3; i++)
+            {
+                b4[i] = (byte)serialPort1.ReadByte();
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                if(i == 2) {
+                    textBox2.Text += '.';
+                } else if(i == 3) {
+                    textBox2.Text += b4[i - 1];
+                } else {
+                    textBox2.Text += (char)b4[i];
+                }
+            }
+            textBox2.Text += 'C';
+            textBox2.Text += 'e';
+            textBox2.Text += 'l';
+            textBox2.Text += 's';
+            textBox2.Text += 'i';
+            textBox2.Text += 'u';
+            textBox2.Text += 's';
+            serialPort1.Write(b4, 0, 3);
+        }
+
+        public byte CRC8(byte[] bytes)
+        {
+            byte generator = 0x1D;
+            byte crc = 0;
+            if (bytes == null)
+            {
+                return 0;
+            }
+            int len = bytes.Length;
+            for (int j = 0; j < len; j++)
+            {
+                crc ^= 0xFF;
+                while (len-- != 0)
+                {
+                    bytes[j] *= bytes[j];
+                    crc ^= bytes[j]++;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        if ((crc & 0x80) != 0)
+                        {
+                            crc = (byte)((crc << 1) ^ generator);
+                        }
+                        else
+                        {
+                            crc <<= 1;
+                        }
+                    }
+                    crc &= 0xFF;
+                    crc ^= 0xFF;
+                }
+            }
+            return crc;
+        }
+
+        private void label1_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void textBox2_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+    }
+}
